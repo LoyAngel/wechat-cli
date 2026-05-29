@@ -1,5 +1,8 @@
 """get-chat-history 命令"""
 
+import os
+import re
+
 import click
 
 from ..core.contacts import get_contact_names
@@ -22,7 +25,7 @@ from ..output.formatter import output
 @click.option("--end-time", default="", help="结束时间 YYYY-MM-DD [HH:MM[:SS]]")
 @click.option("--format", "fmt", default="json", type=click.Choice(["json", "text"]), help="输出格式")
 @click.option("--type", "msg_type", default=None, type=click.Choice(MSG_TYPE_NAMES), help="消息类型过滤")
-@click.option("--media", is_flag=True, help="解析媒体文件路径（图片/文件/视频/语音）")
+@click.option("--media", is_flag=True, help="解析并解码媒体文件（图片/文件/视频/语音）")
 @click.pass_context
 def history(ctx, chat_name, limit, offset, start_time, end_time, fmt, msg_type, media):
     """获取指定聊天的消息记录
@@ -33,6 +36,7 @@ def history(ctx, chat_name, limit, offset, start_time, end_time, fmt, msg_type, 
       wechat-cli history "张三" --limit 100 --offset 50  # 分页查询
       wechat-cli history "AI交流群" --start-time "2026-04-01" --end-time "2026-04-02"
       wechat-cli history "张三" --format text             # 纯文本输出
+      wechat-cli history "张三" --media                   # 解析媒体文件并解码图片
     """
     app = ctx.obj
 
@@ -51,6 +55,15 @@ def history(ctx, chat_name, limit, offset, start_time, end_time, fmt, msg_type, 
         click.echo(f"找不到 {chat_ctx['display_name']} 的消息记录", err=True)
         ctx.exit(1)
 
+    # 图片密钥（用于 --media 时解码图片）
+    image_key = None
+    xor_key = None
+    if media:
+        try:
+            image_key, xor_key = app.image_key_manager.get_key()
+        except Exception:
+            pass  # 无密钥时仍可显示 .dat 路径
+
     names = get_contact_names(app.cache, app.decrypted_dir)
     type_filter = MSG_TYPE_FILTERS[msg_type] if msg_type else None
     lines, failures = collect_chat_history(
@@ -59,8 +72,17 @@ def history(ctx, chat_name, limit, offset, start_time, end_time, fmt, msg_type, 
         msg_type_filter=type_filter, resolve_media=media, db_dir=app.db_dir,
     )
 
+    # 解码图片路径
+    media_files = {}
+    if media and image_key and lines:
+        media_files = _decode_media_in_lines(
+            lines, image_key, xor_key, app.decoded_image_dir
+        )
+        if media_files:
+            lines = _replace_media_paths(lines, media_files)
+
     if fmt == 'json':
-        output({
+        result = {
             'chat': chat_ctx['display_name'],
             'username': chat_ctx['username'],
             'is_group': chat_ctx['is_group'],
@@ -72,7 +94,10 @@ def history(ctx, chat_name, limit, offset, start_time, end_time, fmt, msg_type, 
             'type': msg_type or None,
             'messages': lines,
             'failures': failures if failures else None,
-        }, 'json')
+        }
+        if media_files:
+            result['media'] = media_files
+        output(result, 'json')
     else:
         header = f"{chat_ctx['display_name']} 的消息记录（返回 {len(lines)} 条，offset={offset}, limit={limit}）"
         if chat_ctx['is_group']:
@@ -85,3 +110,61 @@ def history(ctx, chat_name, limit, offset, start_time, end_time, fmt, msg_type, 
             output(header + ":\n\n" + "\n".join(lines), 'text')
         else:
             output(f"{chat_ctx['display_name']} 无消息记录", 'text')
+
+
+def _decode_media_in_lines(lines, aes_key, xor_key, out_dir):
+    """从文本行中提取 .dat 路径并解码，返回 {dat_path: decoded_name} 映射。"""
+    from ..core.image_decrypt import process_file
+
+    dat_paths = set()
+    for line in lines:
+        for m in re.finditer(r'\[(图片)\]\s*(\S+\.dat)', line):
+            p = m.group(2)
+            if os.path.isfile(p):
+                dat_paths.add(p)
+
+    if not dat_paths:
+        return {}
+
+    os.makedirs(out_dir, exist_ok=True)
+
+    media_map = {}
+    for dat_path in sorted(dat_paths):
+        try:
+            data, ext = process_file(dat_path, aes_key, xor_key)
+        except Exception:
+            continue
+
+        if data is None or ext is None or len(data) <= 100:
+            continue
+
+        name = os.path.splitext(os.path.basename(dat_path))[0]
+        out_name = name + ext
+        out_path = os.path.join(out_dir, out_name)
+        counter = 1
+        while os.path.exists(out_path):
+            out_name = f"{name}_{counter}{ext}"
+            out_path = os.path.join(out_dir, out_name)
+            counter += 1
+
+        try:
+            with open(out_path, "wb") as f:
+                f.write(data)
+            media_map[dat_path] = out_path
+        except Exception:
+            continue
+
+    return media_map
+
+
+def _replace_media_paths(lines, media_map):
+    """将行中的 .dat 路径替换为解码后的路径。"""
+    result = []
+    for line in lines:
+        for m in re.finditer(r'(\[图片\])\s*(\S+\.dat)', line):
+            dat_path = m.group(2)
+            if dat_path in media_map:
+                decoded = media_map[dat_path]
+                line = line.replace(m.group(0), f"{m.group(1)} {decoded}")
+        result.append(line)
+    return result

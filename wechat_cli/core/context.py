@@ -33,8 +33,22 @@ class AppContext:
 
         self.msg_db_keys = find_msg_db_keys(self.all_keys)
 
+        self.decoded_image_dir = self.cfg["decoded_image_dir"]
+
+        self._image_key_manager = None
+
         # 确保状态目录存在
         os.makedirs(STATE_DIR, exist_ok=True)
+        os.makedirs(self.decoded_image_dir, exist_ok=True)
+
+    @property
+    def image_key_manager(self):
+        if self._image_key_manager is None:
+            from .image_key_manager import ImageKeyManager
+            self._image_key_manager = ImageKeyManager(
+                self.cfg.get("wechat_files_root", "")
+            )
+        return self._image_key_manager
 
     def display_name_fn(self, username, names):
         from .contacts import display_name_for_username

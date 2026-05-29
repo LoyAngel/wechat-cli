@@ -19,7 +19,7 @@
 ## ✨ 功能亮点
 
 - **🚀 开箱即用** — `npm install -g` 一键安装，无需 Python
-- **📦 11 个命令** — sessions、history、search、contacts、members、stats、export、favorites、unread、new-messages、init
+- **📦 13 个命令** — sessions、history、search、contacts、members、stats、export、favorites、unread、new-messages、init、change-account、decode-images
 - **🤖 AI 优先** — 默认 JSON 输出，专为 LLM Agent 工具调用设计
 - **🔒 全程本地** — SQLCipher 即时解密，数据不出本机
 - **📊 丰富统计** — 发言排行、消息类型分布、24 小时活跃图
@@ -99,11 +99,13 @@ wechat-cli init
 
 ![init-claude-code-code-2](image/init-claude-code-2.png)
 
-特别注意，如果你本地有登录微信多个账号，会有多份数据需要你做选择，选择你当前登录的微信账号（默认是第一个）：
+特别注意，如果你本地有登录微信多个账号，会有多份数据需要你做选择，选择你当前登录的微信账号（默认是第一个）。多账号时选择界面会显示 wxid 而非完整路径：
 
 ![init-claude-code-3](image/init-claude-code-3.png)
 
-这里不确定自己现在的登录微信号，可以找到该文件夹，然后按照修改时间排序，你就可以看到了。（）
+> **切换账号：** 如果需要切换到其他微信账号，无需重新 `init`，直接运行 `wechat-cli change-account` 即可弹出相同的账号选择框，切换后会自动重新提取密钥。
+
+这里不确定自己现在的登录微信号，可以找到该文件夹，然后按照修改时间排序，你就可以看到了。
 
 ![init-claude-code-4](image/init-claude-code-4.png)
 
@@ -173,11 +175,15 @@ WeChat CLI 专为 AI Agent 设计，所有命令默认输出结构化 JSON。
 - `wechat-cli sessions --limit 10` — 列出最近会话
 - `wechat-cli history "名称" --limit 20 --format text` — 读取聊天记录
 - `wechat-cli search "关键词" --chat "聊天名"` — 搜索消息
+- `wechat-cli history "名称" --media` — 查看聊天图片（需先设置密钥）
+- `wechat-cli export "名称" --images` — 导出含图片的聊天记录
 - `wechat-cli contacts --query "名称"` — 搜索联系人
 - `wechat-cli unread` — 显示未读会话
 - `wechat-cli new-messages` — 获取上次以来的新消息
 - `wechat-cli members "群名"` — 列出群成员
 - `wechat-cli stats "聊天名" --format text` — 聊天统计
+- `wechat-cli change-account` — 切换微信账号
+- `wechat-cli decode-images --scan-key` — 扫描并保存图片解密密钥
 ```
 
 然后在对话中可以直接问 Claude：
@@ -223,9 +229,10 @@ wechat-cli history "张三" --limit 100 --offset 50
 wechat-cli history "交流群" --start-time "2026-04-01" --end-time "2026-04-03"
 wechat-cli history "张三" --type link      # 只看链接
 wechat-cli history "张三" --format text
+wechat-cli history "张三" --media          # 解析媒体文件路径并解码图片
 ```
 
-**选项：** `--limit`、`--offset`、`--start-time`、`--end-time`、`--type`、`--format`
+**选项：** `--limit`、`--offset`、`--start-time`、`--end-time`、`--type`、`--format`、`--media`
 
 ### `search` — 搜索消息
 
@@ -234,9 +241,10 @@ wechat-cli search "Claude"                 # 全局搜索
 wechat-cli search "Claude" --chat "交流群"  # 指定聊天搜索
 wechat-cli search "开会" --chat "群A" --chat "群B"  # 多个聊天
 wechat-cli search "报告" --type file        # 只搜文件
+wechat-cli search "照片" --media            # 搜索并解析媒体
 ```
 
-**选项：** `--chat`（可多次指定）、`--start-time`、`--end-time`、`--limit`、`--offset`、`--type`、`--format`
+**选项：** `--chat`（可多次指定）、`--start-time`、`--end-time`、`--limit`、`--offset`、`--type`、`--format`、`--media`
 
 ### `contacts` — 联系人搜索与详情
 
@@ -270,10 +278,11 @@ wechat-cli stats "AI交流群" --format text
 ```bash
 wechat-cli export "张三" --format markdown              # 输出到 stdout
 wechat-cli export "张三" --format txt --output chat.txt  # 输出到文件
+wechat-cli export "张三" --images                       # 导出含解码后的图片
 wechat-cli export "群聊" --start-time "2026-04-01" --limit 1000
 ```
 
-**选项：** `--format markdown|txt`、`--output`、`--start-time`、`--end-time`、`--limit`
+**选项：** `--format markdown|txt`、`--output`、`--start-time`、`--end-time`、`--limit`、`--images`
 
 ### `favorites` — 微信收藏
 
@@ -300,6 +309,36 @@ wechat-cli new-messages                    # 后续: 仅返回上次以来的新
 ```
 
 状态保存在 `~/.wechat-cli/last_check.json`，删除此文件可重置。
+
+### `change-account` — 切换微信账号
+
+```bash
+wechat-cli change-account                       # 弹出账号选择框（多账号时显示 wxid）
+wechat-cli change-account --db-dir ~/path/to/db_storage  # 直接指定数据目录
+```
+
+**选项：** `--db-dir`
+
+> **说明：** 切换账号会自动重新提取数据库密钥、清理旧的解密缓存。图片密钥（`image_keys.json`）按 wxid 存储不会清除，切换后如果之前扫描过该账号的图片密钥可直接复用。
+>
+> 如果本地只有一个微信账号，`change-account` 会自动选择该账号，无需手动指定。
+
+### `decode-images` — 解密微信加密图片
+
+```bash
+wechat-cli decode-images --scan-key              # 扫描并保存密钥（首次使用，需先打开大图）
+wechat-cli decode-images --chat "张三"            # 解密特定聊天的图片（推荐）
+wechat-cli decode-images --key 9f211f90c4d22ab4  # 手动指定 16 位 AES 密钥
+wechat-cli decode-images --limit 100              # 最多处理 100 个文件（默认 50，最大 10000）
+wechat-cli decode-images --all                    # 处理全部文件
+wechat-cli decode-images --out-dir ./images       # 指定输出目录
+```
+
+**选项：** `--scan-key`、`--key`、`--chat`、`--limit`、`--all`、`--out-dir`、`--format`
+
+> **工作流：** 首次使用 `--scan-key` 扫描并保存密钥（需先在微信中打开聊天大图），之后直接 `--chat "联系人"` 即可解密。密钥保存后，`history --media`、`search --media`、`export --images` 都会自动使用。
+>
+> **多账号：** `decode-images` 自动跟随当前账号，无需指定 `--account`。使用 `wechat-cli change-account` 切换账号后再运行即可。
 
 ---
 

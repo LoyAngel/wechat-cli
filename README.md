@@ -19,7 +19,7 @@ Chat history · Contacts · Sessions · Favorites · Statistics · Export
 ## ✨ Highlights
 
 - **🚀 Zero-config install** — `npm install -g` and you're done, no Python needed
-- **📦 11 commands** — sessions, history, search, contacts, members, stats, export, favorites, unread, new-messages, init
+- **📦 12 commands** — sessions, history, search, contacts, members, stats, export, favorites, unread, new-messages, init, decode-images
 - **🤖 AI-first** — JSON output by default, designed for LLM agent tool calls
 - **🔒 Fully local** — on-the-fly SQLCipher decryption, data never leaves your machine
 - **📊 Rich analytics** — top senders, message type breakdown, 24-hour activity charts
@@ -175,11 +175,14 @@ Common commands:
 - `wechat-cli sessions --limit 10` — list recent chats
 - `wechat-cli history "NAME" --limit 20 --format text` — read chat history
 - `wechat-cli search "KEYWORD" --chat "CHAT_NAME"` — search messages
+- `wechat-cli history "NAME" --media` — view chat images (requires key setup)
+- `wechat-cli export "NAME" --images` — export chat with images
 - `wechat-cli contacts --query "NAME"` — search contacts
 - `wechat-cli unread` — show unread sessions
 - `wechat-cli new-messages` — get messages since last check
 - `wechat-cli members "GROUP"` — list group members
 - `wechat-cli stats "CHAT" --format text` — chat statistics
+- `wechat-cli decode-images --scan-key` — decrypt WeChat .dat images
 ```
 
 Then in conversation you can ask Claude things like:
@@ -225,9 +228,10 @@ wechat-cli history "Alice" --limit 100 --offset 50
 wechat-cli history "Team" --start-time "2026-04-01" --end-time "2026-04-03"
 wechat-cli history "Alice" --type link     # Only links
 wechat-cli history "Alice" --format text
+wechat-cli history "Alice" --media         # Resolve and decode media files
 ```
 
-**Options:** `--limit`, `--offset`, `--start-time`, `--end-time`, `--type`, `--format`
+**Options:** `--limit`, `--offset`, `--start-time`, `--end-time`, `--type`, `--format`, `--media`
 
 ### `search` — Search Messages
 
@@ -236,9 +240,10 @@ wechat-cli search "hello"                  # Global search
 wechat-cli search "hello" --chat "Alice"   # In specific chat
 wechat-cli search "meeting" --chat "TeamA" --chat "TeamB"  # Multiple chats
 wechat-cli search "report" --type file     # Only files
+wechat-cli search "photo" --media          # Search and resolve media
 ```
 
-**Options:** `--chat` (repeatable), `--start-time`, `--end-time`, `--limit`, `--offset`, `--type`, `--format`
+**Options:** `--chat` (repeatable), `--start-time`, `--end-time`, `--limit`, `--offset`, `--type`, `--format`, `--media`
 
 ### `contacts` — Contact Search & Details
 
@@ -272,10 +277,11 @@ Returns: total messages, type breakdown, top 10 senders, 24-hour activity distri
 ```bash
 wechat-cli export "Alice" --format markdown              # To stdout
 wechat-cli export "Alice" --format txt --output chat.txt  # To file
+wechat-cli export "Alice" --images                       # Export with decoded images
 wechat-cli export "Team" --start-time "2026-04-01" --limit 1000
 ```
 
-**Options:** `--format markdown|txt`, `--output`, `--start-time`, `--end-time`, `--limit`
+**Options:** `--format markdown|txt`, `--output`, `--start-time`, `--end-time`, `--limit`, `--images`
 
 ### `favorites` — WeChat Bookmarks
 
@@ -302,6 +308,21 @@ wechat-cli new-messages                    # Subsequent: only new since last cal
 ```
 
 State saved at `~/.wechat-cli/last_check.json`. Delete to reset.
+
+### `decode-images` — Decrypt WeChat Encrypted Images
+
+```bash
+wechat-cli decode-images --scan-key              # Scan and save key (first-time setup, open a full image first)
+wechat-cli decode-images --chat "Alice"           # Decrypt images from a specific chat (recommended)
+wechat-cli decode-images --key 9f211f90c4d22ab4  # Specify the 16-char AES key manually
+wechat-cli decode-images --account wxid_xxx       # Specify an account (for multi-account setups)
+wechat-cli decode-images --limit 100              # Process at most 100 files
+wechat-cli decode-images --out-dir ./images       # Custom output directory
+```
+
+**Options:** `--scan-key`, `--key`, `--chat`, `--account`, `--limit`, `--out-dir`, `--format`
+
+> **Workflow:** Run `--scan-key` once (must open a full-size image in WeChat first) to persist the key. After that, `--chat "Name"` works directly. Once keys are saved, `history --media`, `search --media`, and `export --images` all work automatically.
 
 ---
 

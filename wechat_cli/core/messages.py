@@ -587,7 +587,7 @@ def collect_chat_history(ctx, names, display_name_fn, start_ts=None, end_ts=None
 
 # ---- 搜索查询 ----
 
-def _collect_search_entries(conn, contexts, names, keyword, display_name_fn, start_ts=None, end_ts=None, candidate_limit=20, msg_type_filter=None):
+def _collect_search_entries(conn, contexts, names, keyword, display_name_fn, start_ts=None, end_ts=None, candidate_limit=20, msg_type_filter=None, resolve_media=False, db_dir=None):
     collected = []
     failures = []
     id_to_username = _load_name2id_maps(conn)
@@ -603,7 +603,10 @@ def _collect_search_entries(conn, contexts, names, keyword, display_name_fn, sta
                     break
                 fetch_offset += len(rows)
                 for row in rows:
-                    formatted = _build_search_entry(row, ctx, names, id_to_username, display_name_fn)
+                    formatted = _build_search_entry(
+                        row, ctx, names, id_to_username, display_name_fn,
+                        resolve_media=resolve_media, db_dir=db_dir,
+                    )
                     if formatted:
                         collected.append(formatted)
                         if len(collected) - before >= candidate_limit:
@@ -615,7 +618,7 @@ def _collect_search_entries(conn, contexts, names, keyword, display_name_fn, sta
     return collected, failures
 
 
-def collect_chat_search(ctx, names, keyword, display_name_fn, start_ts=None, end_ts=None, candidate_limit=20, msg_type_filter=None):
+def collect_chat_search(ctx, names, keyword, display_name_fn, start_ts=None, end_ts=None, candidate_limit=20, msg_type_filter=None, resolve_media=False, db_dir=None):
     collected = []
     failures = []
     contexts_by_db = {}
@@ -629,6 +632,7 @@ def collect_chat_search(ctx, names, keyword, display_name_fn, start_ts=None, end
                     conn, db_contexts, names, keyword, display_name_fn,
                     start_ts=start_ts, end_ts=end_ts, candidate_limit=candidate_limit,
                     msg_type_filter=msg_type_filter,
+                    resolve_media=resolve_media, db_dir=db_dir,
                 )
                 collected.extend(db_entries)
                 failures.extend(db_failures)
@@ -637,7 +641,7 @@ def collect_chat_search(ctx, names, keyword, display_name_fn, start_ts=None, end
     return collected, failures
 
 
-def search_all_messages(msg_db_keys, cache, names, keyword, display_name_fn, start_ts=None, end_ts=None, candidate_limit=20, msg_type_filter=None):
+def search_all_messages(msg_db_keys, cache, names, keyword, display_name_fn, start_ts=None, end_ts=None, candidate_limit=20, msg_type_filter=None, resolve_media=False, db_dir=None):
     collected = []
     failures = []
     for rel_key in msg_db_keys:
@@ -651,6 +655,7 @@ def search_all_messages(msg_db_keys, cache, names, keyword, display_name_fn, sta
                     conn, contexts, names, keyword, display_name_fn,
                     start_ts=start_ts, end_ts=end_ts, candidate_limit=candidate_limit,
                     msg_type_filter=msg_type_filter,
+                    resolve_media=resolve_media, db_dir=db_dir,
                 )
                 collected.extend(db_entries)
                 failures.extend(db_failures)

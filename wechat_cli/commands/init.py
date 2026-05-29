@@ -70,3 +70,5 @@ def init(db_dir, force):
     click.echo("\n现在可以使用:")
     click.echo("  wechat-cli sessions")
     click.echo("  wechat-cli history \"联系人\"")
+    click.echo("\n提示: 运行以下命令可启用图片查看/导出功能（需先在微信中打开聊天大图）:")
+    click.echo("  wechat-cli decode-images --scan-key")

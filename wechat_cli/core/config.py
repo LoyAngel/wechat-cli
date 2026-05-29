@@ -21,15 +21,20 @@ CONFIG_FILE = os.path.join(STATE_DIR, "config.json")
 KEYS_FILE = os.path.join(STATE_DIR, "all_keys.json")
 
 
+def _wxid_from_path(path):
+    """从 db_storage 路径提取 wxid。"""
+    return os.path.basename(os.path.dirname(path))
+
+
 def _choose_candidate(candidates):
     if len(candidates) == 1:
         return candidates[0]
     if len(candidates) > 1:
         if not sys.stdin.isatty():
             return candidates[0]
-        print("[!] 检测到多个微信数据目录:")
+        print("[!] 检测到多个微信账号:")
         for i, c in enumerate(candidates, 1):
-            print(f"    {i}. {c}")
+            print(f"    {i}. {_wxid_from_path(c)}")
         print("    0. 跳过")
         try:
             while True:
@@ -175,10 +180,11 @@ def load_config(config_path=None):
     cfg.setdefault("keys_file", os.path.join(state_dir, "all_keys.json"))
     cfg.setdefault("decrypted_dir", os.path.join(state_dir, "decrypted"))
     cfg.setdefault("decoded_image_dir", os.path.join(state_dir, "decoded_images"))
+    cfg.setdefault("image_keys_file", os.path.join(state_dir, "image_keys.json"))
     cfg.setdefault("wechat_process", _DEFAULT_PROCESS)
 
     # 所有路径确保为绝对路径
-    for key in ("db_dir", "keys_file", "decrypted_dir", "decoded_image_dir"):
+    for key in ("db_dir", "keys_file", "decrypted_dir", "decoded_image_dir", "image_keys_file"):
         if key in cfg and not os.path.isabs(cfg[key]):
             cfg[key] = os.path.join(state_dir, cfg[key])
 
@@ -188,5 +194,10 @@ def load_config(config_path=None):
         cfg["wechat_base_dir"] = os.path.dirname(db_dir)
     else:
         cfg["wechat_base_dir"] = db_dir
+
+    # 多账号根目录（wechat_base_dir 的父目录，如 E:\xwechat_files）
+    wbd = cfg.get("wechat_base_dir", "")
+    parent = os.path.dirname(os.path.normpath(wbd)) if wbd else ""
+    cfg["wechat_files_root"] = parent if os.path.basename(parent) == "xwechat_files" else wbd
 
     return cfg

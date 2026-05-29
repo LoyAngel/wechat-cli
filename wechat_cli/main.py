@@ -20,6 +20,7 @@ def cli(ctx, config_path):
     \b
     使用示例:
       wechat-cli init                                # 首次使用：提取密钥
+      wechat-cli change-account                      # 切换微信账号
       wechat-cli sessions                            # 最近会话列表
       wechat-cli sessions --limit 10                 # 最近 10 个会话
       wechat-cli history "张三" --limit 20          # 查看张三的最近 20 条消息
@@ -30,7 +31,7 @@ def cli(ctx, config_path):
       wechat-cli new-messages                       # 获取增量新消息
     """
     # init/version 命令不需要 AppContext
-    if ctx.invoked_subcommand in ("init", "version"):
+    if ctx.invoked_subcommand in ("init", "version", "change-account"):
         return
 
     try:
@@ -55,8 +56,11 @@ from .commands.export import export
 from .commands.stats import stats
 from .commands.unread import unread
 from .commands.favorites import favorites
+from .commands.change_account import change_account
+from .commands.decode_images import decode_images
 
 cli.add_command(init)
+cli.add_command(change_account)
 cli.add_command(sessions)
 cli.add_command(history)
 cli.add_command(search)
@@ -67,6 +71,7 @@ cli.add_command(export)
 cli.add_command(stats)
 cli.add_command(unread)
 cli.add_command(favorites)
+cli.add_command(decode_images)
 
 
 if __name__ == "__main__":
