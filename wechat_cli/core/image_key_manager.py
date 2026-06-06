@@ -1,4 +1,4 @@
-"""图片密钥管理 — 持久化 AES/XOR 密钥到 ~/.wechat-cli/image_keys.json"""
+"""图片密钥管理 — 持久化 AES/XOR 密钥到配置目录下的 image_keys.json"""
 
 import json
 import os
@@ -6,7 +6,7 @@ import sys
 
 from .config import STATE_DIR
 
-IMAGE_KEYS_FILE = os.path.join(STATE_DIR, "image_keys.json")
+DEFAULT_IMAGE_KEYS_FILE = os.path.join(STATE_DIR, "image_keys.json")
 _DEFAULT_XOR_KEY = 0xBD
 
 
@@ -17,22 +17,25 @@ class MissingKeyError(Exception):
 class ImageKeyManager:
     """管理微信图片解密密钥（AES + XOR）的持久化和查询。"""
 
-    def __init__(self, wechat_files_root):
+    def __init__(self, wechat_files_root, image_keys_file=None):
         self._wechat_files_root = wechat_files_root
+        self._keys_file = image_keys_file or DEFAULT_IMAGE_KEYS_FILE
         self._keys = {}  # {account: {"aes_key": str, "xor_key": int}}
         self._load()
 
     def _load(self):
-        if os.path.exists(IMAGE_KEYS_FILE):
+        if os.path.exists(self._keys_file):
             try:
-                with open(IMAGE_KEYS_FILE, encoding="utf-8") as f:
+                with open(self._keys_file, encoding="utf-8") as f:
                     self._keys = json.load(f)
             except (json.JSONDecodeError, IOError):
                 self._keys = {}
 
     def _save(self):
-        os.makedirs(STATE_DIR, exist_ok=True)
-        with open(IMAGE_KEYS_FILE, "w", encoding="utf-8") as f:
+        key_dir = os.path.dirname(self._keys_file)
+        if key_dir:
+            os.makedirs(key_dir, exist_ok=True)
+        with open(self._keys_file, "w", encoding="utf-8") as f:
             json.dump(self._keys, f, indent=2, ensure_ascii=False)
 
     # ---- public API ----
@@ -134,3 +137,8 @@ class ImageKeyManager:
     def accounts(self):
         """返回所有已知账号的 wxid 列表。"""
         return list(self._keys.keys())
+
+    @property
+    def keys_file(self):
+        """返回密钥文件路径。"""
+        return self._keys_file

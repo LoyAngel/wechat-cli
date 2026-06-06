@@ -177,22 +177,30 @@ def _format_app_message_text(content, local_type, is_group, chat_username, chat_
             quote_text += f"\n  ↳ {prefix}{ref_content}"
         return quote_text
     if app_type == 6:
-        # Try to resolve file path
         if resolve_media and db_dir:
             msg_dir = os.path.join(os.path.dirname(db_dir), "msg", "file")
             if title and os.path.isdir(msg_dir):
                 from datetime import datetime as _dt
+                # 先尝试消息时间对应的月份目录
                 dt = _dt.fromtimestamp(create_time_ts) if create_time_ts else None
+                search_dirs = []
                 if dt:
                     file_dir = os.path.join(msg_dir, dt.strftime("%Y-%m"))
                     if os.path.isdir(file_dir):
-                        target = os.path.join(file_dir, title)
-                        if os.path.isfile(target):
-                            return f"[文件] {title}\n  {target}"
-                        # Fuzzy match
-                        for f in os.listdir(file_dir):
-                            if title in f or f in title:
-                                return f"[文件] {title}\n  {os.path.join(file_dir, f)}"
+                        search_dirs.append(file_dir)
+                # 回退：搜索所有月份目录（处理转发文件等时间不一致的情况）
+                for d in sorted(os.listdir(msg_dir), reverse=True):
+                    full = os.path.join(msg_dir, d)
+                    if os.path.isdir(full) and full not in search_dirs:
+                        search_dirs.append(full)
+
+                for file_dir in search_dirs:
+                    target = os.path.join(file_dir, title)
+                    if os.path.isfile(target):
+                        return f"[文件] {title}\n  {target}"
+                    for f in os.listdir(file_dir):
+                        if title in f or f in title:
+                            return f"[文件] {title}\n  {os.path.join(file_dir, f)}"
         return f"[文件] {title}" if title else "[文件]"
     if app_type == 5:
         return f"[链接] {title}" if title else "[链接]"
@@ -222,7 +230,7 @@ def _format_voip_message_text(content):
     return f"[通话] {status_map.get(raw_text, raw_text)}"
 
 
-def _resolve_media_path(db_dir, content, local_type, create_time_ts, chat_username=None):
+def _resolve_media_path(db_dir, content, local_type, create_time_ts, chat_username=None, sender_username=None, resolved_files=None):
     """尝试解析媒体文件在磁盘上的路径。
 
     Args:
@@ -231,10 +239,14 @@ def _resolve_media_path(db_dir, content, local_type, create_time_ts, chat_userna
         local_type: 消息类型
         create_time_ts: 消息时间戳
         chat_username: 聊天对象 username（用于定位 attach 子目录）
+        sender_username: 发送者 username（群聊时优先用此值定位 hash 目录）
+        resolved_files: 已匹配过的文件路径集合，用于去重
 
     Returns:
         (path, exists) 元组，path 为 None 表示无法解析
     """
+    # 群聊：优先用发送者 username（图片按发送者存储，非按群存储）
+    hash_username = sender_username or chat_username
     base_type = local_type & 0xFFFFFFFF
     wechat_base = os.path.dirname(db_dir)
     msg_dir = os.path.join(wechat_base, "msg")
@@ -268,37 +280,96 @@ def _resolve_media_path(db_dir, content, local_type, create_time_ts, chat_userna
         return None, False
 
     # 图片消息 (type 3): msg/attach/<hash>/YYYY-MM/Img/*.dat
-    # 视频/语音消息: msg/video/YYYY-MM/ 或 msg/attach/
-    if base_type in (3, 34, 43):
-        # 搜索 attach 目录下对应月份的文件
+    if base_type == 3:
         attach_dir = os.path.join(msg_dir, "attach")
         if not os.path.isdir(attach_dir):
             return None, False
 
-        # 尝试用 chat_username 的 MD5 匹配 attach 子目录
         target_hash = None
-        if chat_username:
-            h = hashlib.md5(chat_username.encode()).hexdigest()
+        if hash_username:
+            h = hashlib.md5(hash_username.encode()).hexdigest()
             candidate = os.path.join(attach_dir, h)
             if os.path.isdir(candidate):
                 target_hash = h
 
-        # 限定搜索范围：目标目录或所有目录
         search_dirs = [target_hash] if target_hash else [
             d for d in os.listdir(attach_dir)
             if os.path.isdir(os.path.join(attach_dir, d))
         ]
 
-        sub_dir_name = "Img" if base_type == 3 else ("Video" if base_type == 43 else "Voice")
-
         for d in search_dirs:
-            sub = os.path.join(attach_dir, d, date_prefix, sub_dir_name)
-            if os.path.isdir(sub):
-                files = [f for f in os.listdir(sub) if not f.endswith("_h.dat")]
-                if files:
-                    # 返回目录路径（具体是哪个文件无法从 XML 精确匹配）
-                    sample = files[0]
-                    return os.path.join(sub, sample), True
+            sub = os.path.join(attach_dir, d, date_prefix, "Img")
+            if not os.path.isdir(sub):
+                continue
+            all_files = os.listdir(sub)
+            if not all_files:
+                continue
+            # 排除缩略图/辅助文件（_t.dat / _h.dat）
+            preferred = [f for f in all_files
+                         if not (f.endswith("_h.dat") or "_t." in f or "_t_" in f.rsplit(".", 1)[0])]
+            if not preferred:
+                preferred = [f for f in all_files if not f.endswith("_h.dat")]
+            if not preferred:
+                continue
+
+            # 多个候选文件时，排除已匹配过的，再按 mtime 找最接近的
+            if resolved_files is not None:
+                preferred = [f for f in preferred
+                             if os.path.join(sub, f) not in resolved_files]
+                if not preferred:
+                    continue
+
+            if len(preferred) == 1:
+                result = os.path.join(sub, preferred[0])
+                if resolved_files is not None:
+                    resolved_files.add(result)
+                return result, True
+
+            best_file = None
+            best_diff = float('inf')
+            for f in preferred:
+                fpath = os.path.join(sub, f)
+                try:
+                    f_mtime = int(os.path.getmtime(fpath))
+                except OSError:
+                    continue
+                diff = abs(f_mtime - create_time_ts)
+                if diff < best_diff:
+                    best_diff = diff
+                    best_file = f
+
+            if best_file:
+                result = os.path.join(sub, best_file)
+                if resolved_files is not None:
+                    resolved_files.add(result)
+                return result, True
+
+        return None, False
+
+    # 视频/语音消息: msg/video/YYYY-MM/ 或 msg/attach/
+    if base_type in (34, 43):
+        attach_dir = os.path.join(msg_dir, "attach")
+        if os.path.isdir(attach_dir):
+            target_hash = None
+            if hash_username:
+                h = hashlib.md5(hash_username.encode()).hexdigest()
+                candidate = os.path.join(attach_dir, h)
+                if os.path.isdir(candidate):
+                    target_hash = h
+
+            search_dirs = [target_hash] if target_hash else [
+                d for d in os.listdir(attach_dir)
+                if os.path.isdir(os.path.join(attach_dir, d))
+            ]
+
+            sub_dir_name = "Video" if base_type == 43 else "Voice"
+
+            for d in search_dirs:
+                sub = os.path.join(attach_dir, d, date_prefix, sub_dir_name)
+                if os.path.isdir(sub):
+                    files = os.listdir(sub)
+                    if files:
+                        return os.path.join(sub, files[0]), True
 
         # 视频：也检查 msg/video/
         if base_type == 43:
@@ -308,10 +379,10 @@ def _resolve_media_path(db_dir, content, local_type, create_time_ts, chat_userna
                 if thumbs:
                     return os.path.join(video_dir, thumbs[0]), True
 
-    return None, False
+        return None, False
 
 
-def _format_message_text(local_id, local_type, content, is_group, chat_username, chat_display_name, names, display_name_fn, db_dir=None, create_time_ts=0, resolve_media=False):
+def _format_message_text(local_id, local_type, content, is_group, chat_username, chat_display_name, names, display_name_fn, db_dir=None, create_time_ts=0, resolve_media=False, sender_username=None, resolved_files=None):
     sender, text = _parse_message_content(content, local_type, is_group)
     base_type, _ = _split_msg_type(local_type)
 
@@ -320,7 +391,8 @@ def _format_message_text(local_id, local_type, content, is_group, chat_username,
     if resolve_media and db_dir and content:
         try:
             media_path, media_exists = _resolve_media_path(
-                db_dir, content, local_type, create_time_ts, chat_username
+                db_dir, content, local_type, create_time_ts, chat_username,
+                sender_username=sender_username, resolved_files=resolved_files,
             )
         except Exception:
             pass
@@ -510,15 +582,20 @@ def _page_ranked_entries(entries, limit, offset):
 
 # ---- 构建行 ----
 
-def _build_history_line(row, ctx, names, id_to_username, display_name_fn, resolve_media=False, db_dir=None):
+def _build_history_line(row, ctx, names, id_to_username, display_name_fn, resolve_media=False, db_dir=None, resolved_files=None):
     local_id, local_type, create_time, real_sender_id, content, ct = row
     time_str = datetime.fromtimestamp(create_time).strftime('%Y-%m-%d %H:%M')
     content = decompress_content(content, ct)
     if content is None:
         content = '(无法解压)'
+    # 群聊：找出发送者的 username 用于解析媒体路径（图片按发送者存储）
+    sender_uname = None
+    if ctx['is_group']:
+        sender_uname = id_to_username.get(real_sender_id, '')
     sender, text = _format_message_text(
         local_id, local_type, content, ctx['is_group'], ctx['username'], ctx['display_name'], names, display_name_fn,
         db_dir=db_dir, create_time_ts=create_time, resolve_media=resolve_media,
+        sender_username=sender_uname, resolved_files=resolved_files,
     )
     sender_label = _resolve_sender_label(
         real_sender_id, sender, ctx['is_group'], ctx['username'], ctx['display_name'], names, id_to_username, display_name_fn
@@ -528,14 +605,18 @@ def _build_history_line(row, ctx, names, id_to_username, display_name_fn, resolv
     return create_time, f'[{time_str}] {text}'
 
 
-def _build_search_entry(row, ctx, names, id_to_username, display_name_fn, resolve_media=False, db_dir=None):
+def _build_search_entry(row, ctx, names, id_to_username, display_name_fn, resolve_media=False, db_dir=None, resolved_files=None):
     local_id, local_type, create_time, real_sender_id, content, ct = row
     content = decompress_content(content, ct)
     if content is None:
         return None
+    sender_uname = None
+    if ctx['is_group']:
+        sender_uname = id_to_username.get(real_sender_id, '')
     sender, text = _format_message_text(
         local_id, local_type, content, ctx['is_group'], ctx['username'], ctx['display_name'], names, display_name_fn,
         db_dir=db_dir, create_time_ts=create_time, resolve_media=resolve_media,
+        sender_username=sender_uname, resolved_files=resolved_files,
     )
     if text and len(text) > 300:
         text = text[:300] + '...'
@@ -557,6 +638,7 @@ def collect_chat_history(ctx, names, display_name_fn, start_ts=None, end_ts=None
     failures = []
     candidate_limit = _candidate_page_size(limit, offset)
     batch_size = min(candidate_limit, _HISTORY_QUERY_BATCH_SIZE)
+    resolved_files = set() if resolve_media else None
 
     for table_ctx in _iter_table_contexts(ctx):
         try:
@@ -571,7 +653,7 @@ def collect_chat_history(ctx, names, display_name_fn, start_ts=None, end_ts=None
                     fetch_offset += len(rows)
                     for row in rows:
                         try:
-                            collected.append(_build_history_line(row, table_ctx, names, id_to_username, display_name_fn, resolve_media=resolve_media, db_dir=db_dir))
+                            collected.append(_build_history_line(row, table_ctx, names, id_to_username, display_name_fn, resolve_media=resolve_media, db_dir=db_dir, resolved_files=resolved_files))
                         except Exception as e:
                             failures.append(f"local_id={row[0]}: {e}")
                         if len(collected) - before >= candidate_limit:
@@ -592,6 +674,7 @@ def _collect_search_entries(conn, contexts, names, keyword, display_name_fn, sta
     failures = []
     id_to_username = _load_name2id_maps(conn)
     batch_size = candidate_limit
+    resolved_files = set() if resolve_media else None
 
     for ctx in contexts:
         try:
@@ -606,6 +689,7 @@ def _collect_search_entries(conn, contexts, names, keyword, display_name_fn, sta
                     formatted = _build_search_entry(
                         row, ctx, names, id_to_username, display_name_fn,
                         resolve_media=resolve_media, db_dir=db_dir,
+                        resolved_files=resolved_files,
                     )
                     if formatted:
                         collected.append(formatted)

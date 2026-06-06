@@ -46,7 +46,8 @@ class AppContext:
         if self._image_key_manager is None:
             from .image_key_manager import ImageKeyManager
             self._image_key_manager = ImageKeyManager(
-                self.cfg.get("wechat_files_root", "")
+                self.cfg.get("wechat_files_root", ""),
+                self.cfg.get("image_keys_file")
             )
         return self._image_key_manager
 

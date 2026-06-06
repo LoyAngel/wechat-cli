@@ -8,13 +8,24 @@ import tempfile
 
 import click
 
-from ..core.config import CONFIG_FILE, KEYS_FILE, STATE_DIR, auto_detect_db_dir
+from ..core.config import (
+    account_config_path,
+    auto_detect_db_dir,
+    resolve_state_paths,
+    save_current_config_path,
+)
 
 
 @click.command("change-account")
 @click.option("--db-dir", default=None, help="直接指定微信数据目录路径（应为 db_storage 目录）")
-def change_account(db_dir):
+@click.pass_context
+def change_account(ctx, db_dir):
     """切换微信账号，更新配置并重新提取密钥"""
+    config_path = None
+    if ctx is not None:
+        root_ctx = ctx.find_root()
+        config_path = root_ctx.params.get("config_path")
+
     # 1. 确定目标 db_dir
     if db_dir is None:
         db_dir = auto_detect_db_dir()
@@ -37,31 +48,36 @@ def change_account(db_dir):
             click.echo(f"警告: 账号标识 '{wxid}' 不像有效的微信 wxid，可能无法正常工作", err=True)
         click.echo(f"[+] 使用指定数据目录: {db_dir}")
 
+    if not config_path:
+        config_path = account_config_path(wxid)
+    config_path, state_dir, keys_file = resolve_state_paths(config_path)
+
     # 2. 加载/创建配置
     cfg = {}
-    if os.path.exists(CONFIG_FILE):
+    if os.path.exists(config_path):
         try:
-            with open(CONFIG_FILE, encoding="utf-8") as f:
+            with open(config_path, encoding="utf-8") as f:
                 cfg = json.load(f)
         except json.JSONDecodeError:
             pass
 
     old_db_dir = cfg.get("db_dir", "")
     if old_db_dir == db_dir:
-        click.echo("[+] 已是当前账号，无需切换")
+        save_current_config_path(config_path)
+        click.echo("[+] 已是当前账号，已更新当前配置指向")
         return
 
     # 3. 更新 db_dir 并写入配置
     cfg["db_dir"] = db_dir
-    os.makedirs(STATE_DIR, exist_ok=True)
-    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+    os.makedirs(state_dir, exist_ok=True)
+    with open(config_path, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2, ensure_ascii=False)
 
     # 4. 重新提取密钥
     click.echo("\n开始提取密钥...")
     try:
         from ..keys import extract_keys
-        key_map = extract_keys(db_dir, KEYS_FILE)
+        key_map = extract_keys(db_dir, keys_file)
     except RuntimeError as e:
         click.echo(f"\n[!] 密钥提取失败: {e}", err=True)
         if "sudo" not in str(e).lower():
@@ -70,6 +86,8 @@ def change_account(db_dir):
     except Exception as e:
         click.echo(f"\n[!] 密钥提取出错: {e}", err=True)
         sys.exit(1)
+
+    save_current_config_path(config_path)
 
     # 5. 清理旧的解密数据库缓存
     cache_dir = os.path.join(tempfile.gettempdir(), "wechat_cli_cache")

@@ -19,6 +19,51 @@ else:
 STATE_DIR = os.path.expanduser("~/.wechat-cli")
 CONFIG_FILE = os.path.join(STATE_DIR, "config.json")
 KEYS_FILE = os.path.join(STATE_DIR, "all_keys.json")
+ACCOUNTS_DIR = os.path.join(STATE_DIR, "accounts")
+CURRENT_CONFIG_FILE = os.path.join(STATE_DIR, "current.json")
+
+
+def resolve_state_paths(config_path=None):
+    """Resolve config/state/keys paths, honoring a custom config path."""
+    if config_path:
+        config_path = os.path.expanduser(config_path)
+    else:
+        config_path = CONFIG_FILE
+    config_path = os.path.abspath(config_path)
+    state_dir = os.path.dirname(config_path)
+    keys_file = os.path.join(state_dir, "all_keys.json")
+    return config_path, state_dir, keys_file
+
+
+def account_config_path(wxid):
+    """Resolve the conventional config path for a wxid."""
+    safe_wxid = (wxid or "").strip()
+    return os.path.join(ACCOUNTS_DIR, safe_wxid, "config.json")
+
+
+def load_current_config_path():
+    """Load the current config path pointer if present."""
+    if not os.path.exists(CURRENT_CONFIG_FILE):
+        return None
+    try:
+        with open(CURRENT_CONFIG_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+        path = data.get("config_path")
+        if path:
+            return os.path.abspath(os.path.expanduser(path))
+    except (json.JSONDecodeError, OSError, TypeError, ValueError):
+        return None
+    return None
+
+
+def save_current_config_path(config_path):
+    """Persist the current config path pointer."""
+    if not config_path:
+        return
+    os.makedirs(STATE_DIR, exist_ok=True)
+    payload = {"config_path": os.path.abspath(os.path.expanduser(config_path))}
+    with open(CURRENT_CONFIG_FILE, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, ensure_ascii=False)
 
 
 def _wxid_from_path(path):
@@ -153,7 +198,9 @@ def auto_detect_db_dir():
 def load_config(config_path=None):
     """加载配置。默认从 ~/.wechat-cli/config.json 读取。"""
     if config_path is None:
-        config_path = CONFIG_FILE
+        current = load_current_config_path()
+        config_path = current or CONFIG_FILE
+    config_path = os.path.abspath(os.path.expanduser(config_path))
 
     cfg = {}
     if os.path.exists(config_path):

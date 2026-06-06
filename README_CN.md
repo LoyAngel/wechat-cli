@@ -19,7 +19,7 @@
 ## ✨ 功能亮点
 
 - **🚀 开箱即用** — `npm install -g` 一键安装，无需 Python
-- **📦 13 个命令** — sessions、history、search、contacts、members、stats、export、favorites、unread、new-messages、init、change-account、decode-images
+- **📦 14 个命令** — sessions、history、search、contacts、members、stats、export、favorites、unread、new-messages、copy-media、init、change-account、decode-images
 - **🤖 AI 优先** — 默认 JSON 输出，专为 LLM Agent 工具调用设计
 - **🔒 全程本地** — SQLCipher 即时解密，数据不出本机
 - **📊 丰富统计** — 发言排行、消息类型分布、24 小时活跃图
@@ -91,7 +91,8 @@ sudo wechat-cli init
 wechat-cli init
 ```
 
-这一步会自动检测微信数据目录、提取加密密钥，并保存到 `~/.wechat-cli/`。
+这一步会自动检测微信数据目录、提取加密密钥。
+不传 `--config` 时，默认保存到 `~/.wechat-cli/accounts/<wxid>/config.json`；如需自定义位置，可用 `--config` 指定配置文件路径。
 
 ![init-claude-code-1](image/init-claude-code-1.png)
 
@@ -104,6 +105,50 @@ wechat-cli init
 ![init-claude-code-3](image/init-claude-code-3.png)
 
 > **切换账号：** 如果需要切换到其他微信账号，无需重新 `init`，直接运行 `wechat-cli change-account` 即可弹出相同的账号选择框，切换后会自动重新提取密钥。
+
+#### 多账号与 `--config`
+
+如果你需要同时管理多个账号，建议每个账号使用独立的配置文件：
+
+```bash
+# 账号 1
+wechat-cli --config ~/.wechat-cli/config_shop1.json init
+
+# 账号 2
+wechat-cli --config ~/.wechat-cli/config_shop2.json init
+```
+
+注意事项：
+- `--config` 是**配置文件路径**，不是目录。
+- 与该配置文件同目录下会生成 `all_keys.json`、`image_keys.json`、`decoded_images/` 等状态文件。
+- 后续所有命令都应带同一个 `--config`，以使用对应账号的数据。
+
+默认目录约定（不传 `--config` 时）：
+
+```
+~/.wechat-cli/accounts/<wxid>/config.json
+```
+
+示例：
+
+```bash
+wechat-cli --config ~/.wechat-cli/config_shop1.json sessions
+wechat-cli --config ~/.wechat-cli/config_shop1.json change-account
+```
+
+#### 切换账号（`change-account`）
+
+`change-account` 会**更新当前配置文件**中的账号与密钥，因此适合临时切换。
+不传 `--config` 时，会切换到该账号在约定目录下的配置文件，并更新为当前默认配置。
+如果需要长期保留多个账号，请为每个账号使用独立的 `--config` 文件。
+
+```bash
+# 切换当前配置所绑定的账号（会重新提取密钥）
+wechat-cli --config ~/.wechat-cli/config_shop1.json change-account
+
+# 或直接指定 db_storage 路径
+wechat-cli --config ~/.wechat-cli/config_shop1.json change-account --db-dir E:\xwechat_files\wxid_xxx\db_storage
+```
 
 这里不确定自己现在的登录微信号，可以找到该文件夹，然后按照修改时间排序，你就可以看到了。
 
@@ -179,7 +224,10 @@ WeChat CLI 专为 AI Agent 设计，所有命令默认输出结构化 JSON。
 - `wechat-cli export "名称" --images` — 导出含图片的聊天记录
 - `wechat-cli contacts --query "名称"` — 搜索联系人
 - `wechat-cli unread` — 显示未读会话
-- `wechat-cli new-messages` — 获取上次以来的新消息
+- `wechat-cli new-messages --customers-only --detail 5` — 获取客户新消息（含详情）
+- `wechat-cli new-messages --dry-run --detail 5` — 预览新消息但不更新状态文件
+- `wechat-cli copy-media --chat "名称" --out-dir ./ --prefer-hd` — 复制图片和文件附件
+- `wechat-cli copy-media --chat "名称" --out-dir ./ --since "2026-05-30"` — 按时间范围复制媒体
 - `wechat-cli members "群名"` — 列出群成员
 - `wechat-cli stats "聊天名" --format text` — 聊天统计
 - `wechat-cli change-account` — 切换微信账号
@@ -206,7 +254,13 @@ wechat-cli history "张三" --limit 30 --format text
 wechat-cli search "报告" --type file --limit 10
 
 # 监控新消息（适合定时任务）
-wechat-cli new-messages --format text
+wechat-cli new-messages --customers-only --detail 5
+
+# 预览模式，不消耗状态（可反复执行）
+wechat-cli new-messages --customers-only --dry-run --detail 5
+
+# 复制图片和文件附件（PDF/DOC 等）
+wechat-cli copy-media --chat "张三" --out-dir ./output/ --since "2026-05-30" --prefer-hd
 ```
 
 ---
@@ -306,9 +360,34 @@ wechat-cli unread --limit 10 --format text
 ```bash
 wechat-cli new-messages                    # 首次: 返回未读消息 + 保存状态
 wechat-cli new-messages                    # 后续: 仅返回上次以来的新消息
+wechat-cli new-messages --detail 5         # 含最近 5 条消息详情（含媒体路径）
+wechat-cli new-messages --customers-only   # 仅返回个人客户（过滤群聊/公众号）
+wechat-cli new-messages --state-file acc1.json  # 多账号状态隔离
+wechat-cli new-messages --dry-run          # 预览模式，不更新状态文件
+wechat-cli new-messages --dry-run --detail 5  # 预览含详情，可反复执行
 ```
 
-状态保存在 `~/.wechat-cli/last_check.json`，删除此文件可重置。
+**选项：** `--format`、`--detail N`、`--customers-only`、`--state-file`、`--dry-run`
+
+状态保存在 `~/.wechat-cli/last_check.json`（可通过 `--state-file` 自定义），删除此文件可重置。
+使用 `--dry-run` 可预览新消息但不更新状态文件，适合调试和反复检查。
+
+### `copy-media` — 复制聊天媒体文件
+
+```bash
+wechat-cli copy-media --chat "张三" --out-dir "D:/打印/张三/"                # 复制今天的图片和文件
+wechat-cli copy-media --chat "张三" --out-dir "./" --type image --prefer-hd  # 仅高清图片
+wechat-cli copy-media --chat "张三" --out-dir "./" --since "2026-05-30"     # 指定时间范围
+wechat-cli copy-media --chat "张三" --out-dir "./" --type file --since "2026-05-01"  # 仅文件附件
+```
+
+**选项：** `--chat`（必填）、`--out-dir`（必填）、`--type image,file`（默认两者）、`--prefer-hd`、`--since`、`--until`、`--limit`
+
+图片通过直接扫描 `msg/attach/` 目录收集（绕过逐条消息匹配的局限）。
+文件附件（PDF、DOC 等）从聊天记录中解析，并在所有月份目录中跨月搜索。
+未指定 `--since` 时默认当天 00:00。
+
+> **图片解密密钥缺失？** 请先在微信中打开任意聊天大图，然后运行 `wechat-cli decode-images --scan-key` 扫描密钥。
 
 ### `change-account` — 切换微信账号
 

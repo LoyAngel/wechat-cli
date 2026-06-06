@@ -104,7 +104,7 @@ def decode_images(ctx, chat, key, scan_key, out_dir, limit, all_files, fmt):
             sys.exit(1)
 
         # 扫描成功，列出结果
-        click.echo(f"\n已保存 {count} 个账号的密钥到 image_keys.json\n")
+        click.echo(f"\n已保存 {count} 个账号的密钥到 {ikm.keys_file}\n")
         for acct in ikm.accounts:
             info = ikm._keys[acct]
             x_str = f"0x{info['xor_key']:02X}" if info.get("xor_key") is not None else "自动检测"

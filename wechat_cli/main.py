@@ -4,6 +4,12 @@ import sys
 
 import click
 
+# 强制 stdout/stderr 使用 UTF-8 编码，防止 Windows PowerShell 中文乱码
+if sys.stdout.encoding != 'utf-8':
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+if sys.stderr.encoding != 'utf-8':
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+
 from .core.context import AppContext
 
 _VERSION = "0.2.4"
@@ -25,10 +31,12 @@ def cli(ctx, config_path):
       wechat-cli sessions --limit 10                 # 最近 10 个会话
       wechat-cli history "张三" --limit 20          # 查看张三的最近 20 条消息
       wechat-cli history "AI交流群" --start-time "2026-04-01"  # 指定时间范围
-      wechat-cli search "Claude" --chat "AI交流群"   # 在指定群里搜索关键词
+      wechat-cli search "Claude"小号（wxid_8ovuplni6b6922） --chat "AI交流群"   # 在指定群里搜索关键词
       wechat-cli search "你好" --limit 50           # 全局搜索
       wechat-cli contacts --query "李"              # 搜索联系人
-      wechat-cli new-messages                       # 获取增量新消息
+      wechat-cli new-messages --customers-only       # 获取增量新消息（仅客户）
+      wechat-cli copy-media --chat "张三" --out-dir ./  # 复制聊天媒体文件
+      wechat-cli decode-images --chat "张三"         # 解密聊天图片
     """
     # init/version 命令不需要 AppContext
     if ctx.invoked_subcommand in ("init", "version", "change-account"):
@@ -58,6 +66,7 @@ from .commands.unread import unread
 from .commands.favorites import favorites
 from .commands.change_account import change_account
 from .commands.decode_images import decode_images
+from .commands.copy_media import copy_media
 
 cli.add_command(init)
 cli.add_command(change_account)
@@ -72,6 +81,7 @@ cli.add_command(stats)
 cli.add_command(unread)
 cli.add_command(favorites)
 cli.add_command(decode_images)
+cli.add_command(copy_media)
 
 
 if __name__ == "__main__":

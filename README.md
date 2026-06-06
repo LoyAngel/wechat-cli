@@ -19,7 +19,7 @@ Chat history · Contacts · Sessions · Favorites · Statistics · Export
 ## ✨ Highlights
 
 - **🚀 Zero-config install** — `npm install -g` and you're done, no Python needed
-- **📦 12 commands** — sessions, history, search, contacts, members, stats, export, favorites, unread, new-messages, init, decode-images
+- **📦 14 commands** — sessions, history, search, contacts, members, stats, export, favorites, unread, new-messages, copy-media, init, change-account, decode-images
 - **🤖 AI-first** — JSON output by default, designed for LLM agent tool calls
 - **🔒 Fully local** — on-the-fly SQLCipher decryption, data never leaves your machine
 - **📊 Rich analytics** — top senders, message type breakdown, 24-hour activity charts
@@ -93,7 +93,8 @@ sudo wechat-cli init
 wechat-cli init
 ```
 
-This auto-detects your WeChat data directory, extracts encryption keys, and saves config to `~/.wechat-cli/`.
+This auto-detects your WeChat data directory and extracts encryption keys.
+If you don't pass `--config`, it saves to `~/.wechat-cli/accounts/<wxid>/config.json`. Use `--config` to set a custom config file path.
 
 ![init-claude-code-1](image/init-claude-code-1.png)
 
@@ -108,6 +109,50 @@ If you have multiple WeChat accounts logged in locally, you'll be prompted to ch
 If you're unsure which WeChat account is currently active, navigate to the data folder and sort by modification date to find out:
 
 ![init-claude-code-4](image/init-claude-code-4.png)
+
+#### Multi-account with `--config`
+
+If you want to manage multiple accounts, keep a separate config file per account:
+
+```bash
+# Account 1
+wechat-cli --config ~/.wechat-cli/config_shop1.json init
+
+# Account 2
+wechat-cli --config ~/.wechat-cli/config_shop2.json init
+```
+
+Notes:
+- `--config` expects a **file path**, not a directory.
+- The keys file and other state (like `all_keys.json`, `image_keys.json`, `decoded_images/`) are stored alongside that config.
+- Use the same `--config` for all subsequent commands for that account.
+
+Default convention (when `--config` is omitted):
+
+```
+~/.wechat-cli/accounts/<wxid>/config.json
+```
+
+Examples:
+
+```bash
+wechat-cli --config ~/.wechat-cli/config_shop1.json sessions
+wechat-cli --config ~/.wechat-cli/config_shop1.json change-account
+```
+
+#### Switch account (`change-account`)
+
+`change-account` **updates the current config file** with the selected account and re-extracts keys.
+If `--config` is omitted, it switches to the account's conventional config path and sets it as the current default.
+Use separate `--config` files for long-term multi-account setups.
+
+```bash
+# Switch the account bound to this config (re-extracts keys)
+wechat-cli --config ~/.wechat-cli/config_shop1.json change-account
+
+# Or specify a db_storage path directly
+wechat-cli --config ~/.wechat-cli/config_shop1.json change-account --db-dir E:\xwechat_files\wxid_xxx\db_storage
+```
 
 #### macOS: Grant Full Disk Access to Terminal
 
@@ -179,9 +224,13 @@ Common commands:
 - `wechat-cli export "NAME" --images` — export chat with images
 - `wechat-cli contacts --query "NAME"` — search contacts
 - `wechat-cli unread` — show unread sessions
-- `wechat-cli new-messages` — get messages since last check
+- `wechat-cli new-messages --customers-only --detail 5` — get new customer messages (with details)
+- `wechat-cli new-messages --dry-run --detail 5` — preview new messages without updating state
+- `wechat-cli copy-media --chat "NAME" --out-dir ./ --prefer-hd` — copy images and file attachments
+- `wechat-cli copy-media --chat "NAME" --out-dir ./ --since "2026-05-30"` — copy media within time range
 - `wechat-cli members "GROUP"` — list group members
 - `wechat-cli stats "CHAT" --format text` — chat statistics
+- `wechat-cli change-account` — switch WeChat account
 - `wechat-cli decode-images --scan-key` — decrypt WeChat .dat images
 ```
 
@@ -205,7 +254,13 @@ wechat-cli history "Alice" --limit 30 --format text
 wechat-cli search "report" --type file --limit 10
 
 # Monitor for new messages (great for cron/automation)
-wechat-cli new-messages --format text
+wechat-cli new-messages --customers-only --detail 5
+
+# Preview without consuming state (safe to retry)
+wechat-cli new-messages --customers-only --dry-run --detail 5
+
+# Copy images and file attachments (PDF/DOC/etc.)
+wechat-cli copy-media --chat "Alice" --out-dir ./output/ --since "2026-05-30" --prefer-hd
 ```
 
 ---
@@ -305,9 +360,34 @@ wechat-cli unread --limit 10 --format text
 ```bash
 wechat-cli new-messages                    # First: return unread + save state
 wechat-cli new-messages                    # Subsequent: only new since last call
+wechat-cli new-messages --detail 5         # Include last 5 message details (with media paths)
+wechat-cli new-messages --customers-only   # Only personal contacts (filter groups/OA)
+wechat-cli new-messages --state-file acc1.json  # Multi-account state isolation
+wechat-cli new-messages --dry-run          # Preview without updating state file
+wechat-cli new-messages --dry-run --detail 5  # Preview with details, safe to retry
 ```
 
-State saved at `~/.wechat-cli/last_check.json`. Delete to reset.
+**Options:** `--format`, `--detail N`, `--customers-only`, `--state-file`, `--dry-run`
+
+State saved at `~/.wechat-cli/last_check.json` (customizable via `--state-file`). Delete to reset.
+Use `--dry-run` to preview new messages without consuming the state — safe to run repeatedly.
+
+### `copy-media` — Copy Chat Media Files
+
+```bash
+wechat-cli copy-media --chat "Alice" --out-dir "./alice_files/"              # Copy today's images and files
+wechat-cli copy-media --chat "Alice" --out-dir "./" --type image --prefer-hd  # HD images only
+wechat-cli copy-media --chat "Alice" --out-dir "./" --since "2026-05-30"     # With time range
+wechat-cli copy-media --chat "Alice" --out-dir "./" --type file --since "2026-05-01"  # File attachments only
+```
+
+**Options:** `--chat` (required), `--out-dir` (required), `--type image,file` (default both), `--prefer-hd`, `--since`, `--until`, `--limit`
+
+Images are collected by scanning `msg/attach/` directories directly (bypasses per-message matching limitations).
+File attachments (PDF, DOC, etc.) are resolved from chat history and searched across all month directories.
+Without `--since`, defaults to today 00:00.
+
+> **Missing image decryption key?** Open any full-size image in WeChat, then run `wechat-cli decode-images --scan-key` to scan and save the key.
 
 ### `decode-images` — Decrypt WeChat Encrypted Images
 
